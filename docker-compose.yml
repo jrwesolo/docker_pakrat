@@ -1,0 +1,14 @@
+nginx:
+  image: nginx:1.9
+  volumes:
+    - fixtures/nginx.conf:/etc/nginx/nginx.conf:ro
+  volumes_from:
+    - pakrat_data
+  ports:
+    - "80:80"
+pakrat:
+  build: .
+  volumes:
+    - fixtures/repos.yml:/etc/pakrat/repos.yml:ro
+  volumes_from:
+    - pakrat_data

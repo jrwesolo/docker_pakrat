@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+# we only want to allow root to execute this
+if [[ $EUID -ne 0 ]]; then
+  echo "This script must be run as root (ran as $EUID)" >&2
+  exit 1
+fi
+
+# allow user to override UID and GID
+: ${USER_ID:=$PAKRAT_UID}
+: ${GROUP_ID:=$PAKRAT_GID}
+
+# fix UID of pakrat user
+if [[ $USER_ID != $PAKRAT_UID ]]; then
+  usermod -u "$USER_ID" "$PAKRAT_USER"
+fi
+
+# fix GID of pakrat group
+if [[ $GROUP_ID != $PAKRAT_GID ]]; then
+  groupmod -g "$GROUP_ID" "$PAKRAT_GROUP"
+fi
+
+# fix permissions in pakrat folders
+find "$PAKRAT_CONF" "$PAKRAT_DATA" \
+  \( -not -user "$USER_ID" -o -not -group "$GROUP_ID" \) -print0 |\
+  xargs -0rI {} chown -h "$USER_ID":"$GROUP_ID" {}
+
+PAKRAT_CONFIG_FILE="${PAKRAT_CONF}/repos.yml"
+
+if [[ -f $PAKRAT_CONFIG_FILE ]]; then
+  chmod +x "$PAKRAT_CONFIG_FILE"
+else
+  echo "Config missing: $PAKRAT_CONFIG_FILE" >&2
+  exit 1
+fi
+
+# now to the fun stuff
+gosu "$USER_ID":"$GROUP_ID" /usr/local/bin/pakratsync \
+  --outdir "$PAKRAT_DATA" \
+  --config "$PAKRAT_CONFIG_FILE"
