@@ -11,10 +11,34 @@ import time
 import yaml
 
 class RepoCallback(object):
+    # http://stackoverflow.com/questions/1094841/reusable-library-to-get-human-readable-version-of-file-size
+    def sizeof_fmt(self, num, suffix='B'):
+        for unit in ['','Ki','Mi','Gi','Ti','Pi','Ei','Zi']:
+            if abs(num) < 1024.0:
+                return "%3.1f%s%s" % (num, unit, suffix)
+            num /= 1024.0
+        return "%.1f%s%s" % (num, 'Yi', suffix)
+
+    # this is needed because pakrat suppressed normal stdout because of YUM
+    def log(self, msg):
+        sys.__stdout__.write('%s\n' % msg)
+        sys.__stdout__.flush()
+
     def repo_init(self, repo_id, num_pkgs):
-        print('Found %d packages in repo %s' % (num_pkgs, repo_id))
+        self.totalpkg = num_pkgs
+        self.finishpkg = 0
+        self.log('Found %d packages in repo %s' % (num_pkgs, repo_id))
+    def local_pkg_exists(self, repo_id, pkgname):
+        self.finishpkg += 1
+        self.log('(%d/%d) %s, %s already downloaded' % (self.finishpkg, self.totalpkg, repo_id, pkgname))
     def repo_metadata(self, repo_id, status):
-        print('Metadata for repo %s is now %s' % (repo_id, status))
+        self.log('Metadata for repo %s is now %s' % (repo_id, status))
+    def download_start(self, repo_id, _file, url, basename, size, text):
+        self.fname = basename
+    def download_end(self, repo_id, size):
+        if self.fname.endswith('.rpm'):
+            self.finishpkg += 1
+            self.log('(%d/%d) %s, %s (%s)' % (self.finishpkg, self.totalpkg, repo_id, self.fname, self.sizeof_fmt(size)))
 
 def log(msg, plain=False):
     if plain == True:
