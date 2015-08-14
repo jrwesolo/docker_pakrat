@@ -1,40 +1,128 @@
 #!/usr/bin/env bash
 
+script_name="${0##*/}"
+backup_dir='/backup'
+backup_file="${backup_dir}/backup.tar"
+config_file="${PAKRAT_CONF}/repos.yml"
+
 # we only want to allow root to execute this
 if [[ $EUID -ne 0 ]]; then
   echo "This script must be run as root (ran as $EUID)" >&2
   exit 1
 fi
 
+function setup {
+  # fix UID of pakrat user
+  if [[ $USER_ID != $PAKRAT_UID ]]; then
+    usermod -u "$USER_ID" "$PAKRAT_USER"
+  fi
+
+  # fix GID of pakrat group
+  if [[ $GROUP_ID != $PAKRAT_GID ]]; then
+    groupmod -g "$GROUP_ID" "$PAKRAT_GROUP"
+  fi
+
+  # fix permissions in pakrat folders
+  find "$PAKRAT_CONF" "$PAKRAT_DATA" \
+    \( -not -user "$USER_ID" -o -not -group "$GROUP_ID" \) -print0 |\
+    xargs -0rI {} chown -h "$USER_ID":"$GROUP_ID" {}
+}
+
+function sync {
+  if [[ -f $config_file ]]; then
+    chmod +x "$config_file"
+  else
+    echo "Config missing: $config_file" >&2
+    exit 1
+  fi
+
+  # now to the fun stuff
+  gosu "$USER_ID":"$GROUP_ID" /usr/local/bin/pakratsync \
+    --outdir "$PAKRAT_DATA" \
+    --config "$config_file"
+}
+
+function backup {
+  if [[ -d $backup_dir ]]; then
+    echo "Backing up $PAKRAT_DATA to $backup_file"
+    tar \
+      --checkpoint=5000 \
+      --checkpoint-action=exec="du -h $backup_file" \
+      -cpf $backup_file \
+      -C $PAKRAT_DATA . && \
+    du -h $backup_file
+  else
+    echo "Backup directory missing: $backup_dir" >&2
+    exit 2
+  fi
+}
+
+function restore {
+  if [[ -f $backup_file ]]; then
+    if [[ ! "$(ls -A "$PAKRAT_DATA")" ]]; then
+      echo "Restoring $backup_file to $PAKRAT_DATA"
+      tar --checkpoint=5000 -xpf $backup_file -C $PAKRAT_DATA
+    else
+      echo "$PAKRAT_DATA directory is not empty, will not perform restore!"
+      exit 4
+    fi
+  else
+    echo "Backup file missing: $backup_file" >&2
+    exit 3
+  fi
+}
+
+function usage {
+  cat >&2 <<EOF
+
+Usage: ${script_name} [MODE]
+
+Modes (choose one):
+    sync      default, syncs yum repos from repos.yml
+    backup    perform backup yum repos to tar file
+    restore   restores backup from tar file
+
+Sync:
+
+This is the default mode. If none is passed,
+sync will be assumed. Restoring requires that
+a $config_file file exists. Please be sure to
+mount this file when starting your docker
+container.
+
+Backup:
+
+Backing up requires a directory at $backup_dir.
+Please be sure to mount this directory when
+starting your docker container.
+
+Restore:
+
+Restoring from a backup requires that a
+$backup_file file exists. It also requires
+that $PAKRAT_DATA directory is empty. Please
+be sure to mount this file when starting
+your docker container.
+EOF
+  exit 1
+}
+
 # allow user to override UID and GID
 : ${USER_ID:=$PAKRAT_UID}
 : ${GROUP_ID:=$PAKRAT_GID}
 
-# fix UID of pakrat user
-if [[ $USER_ID != $PAKRAT_UID ]]; then
-  usermod -u "$USER_ID" "$PAKRAT_USER"
-fi
+while [[ $1 ]]; do
+  case $1 in
+    backup|restore|sync) mode="$1" ;;
+    help) usage ;;
+    *)
+      echo "Command line option not recognized: $1" >&2
+      usage
+  esac
+  shift
+done
 
-# fix GID of pakrat group
-if [[ $GROUP_ID != $PAKRAT_GID ]]; then
-  groupmod -g "$GROUP_ID" "$PAKRAT_GROUP"
-fi
+: ${mode:='sync'}
 
-# fix permissions in pakrat folders
-find "$PAKRAT_CONF" "$PAKRAT_DATA" \
-  \( -not -user "$USER_ID" -o -not -group "$GROUP_ID" \) -print0 |\
-  xargs -0rI {} chown -h "$USER_ID":"$GROUP_ID" {}
-
-PAKRAT_CONFIG_FILE="${PAKRAT_CONF}/repos.yml"
-
-if [[ -f $PAKRAT_CONFIG_FILE ]]; then
-  chmod +x "$PAKRAT_CONFIG_FILE"
-else
-  echo "Config missing: $PAKRAT_CONFIG_FILE" >&2
-  exit 1
-fi
-
-# now to the fun stuff
-gosu "$USER_ID":"$GROUP_ID" /usr/local/bin/pakratsync \
-  --outdir "$PAKRAT_DATA" \
-  --config "$PAKRAT_CONFIG_FILE"
+setup
+$mode
