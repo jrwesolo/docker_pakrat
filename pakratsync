@@ -60,9 +60,11 @@ def setup_folders(repos):
         safe_makedirs(real_path)
         head, tail = os.path.split(symbolic_path)
         safe_makedirs(head)
+        os.chdir(head)
+        relative_path = os.path.relpath(real_path)
         # clean out symbolic_path if incorrect
         if os.path.islink(symbolic_path):
-            if os.readlink(symbolic_path) != real_path:
+            if os.readlink(symbolic_path) != relative_path:
                 os.unlink(symbolic_path)
         elif os.path.isdir(symbolic_path):
             shutil.rmtree(symbolic_path)
@@ -70,7 +72,7 @@ def setup_folders(repos):
             os.unlink(symbolic_path)
         # setup symbolic link if missing
         if not os.path.exists(symbolic_path):
-            os.symlink(real_path, symbolic_path)
+            os.symlink(relative_path, symbolic_path)
 
 def download_gpg(config):
     for repo, opts in config.iteritems():
