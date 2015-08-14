@@ -10,6 +10,20 @@ import sys
 import time
 import yaml
 
+# this is needed because pakrat suppressed normal stdout because of YUM
+def log(msg, header=False, repo_id=None):
+    if header == True:
+        output_str = "==> %s" % msg
+    else:
+        output_str = msg
+    sys.__stdout__.write('%s\n' % output_str)
+    sys.__stdout__.flush()
+    if repo_id is not None:
+        repo_ver_dir = os.path.join(OUTDIR, friendly(repo_id), SYNCVERSION)
+        if os.path.exists(repo_ver_dir):
+            with open(os.path.join(repo_ver_dir, 'sync_log.txt'), 'a') as logfile:
+                logfile.write('[%s] %s\n' % (time.strftime('%Y-%m-%d %X %Z'), output_str))
+
 class RepoCallback(object):
     # http://stackoverflow.com/questions/1094841/reusable-library-to-get-human-readable-version-of-file-size
     def sizeof_fmt(self, num, suffix='B'):
@@ -19,32 +33,21 @@ class RepoCallback(object):
             num /= 1024.0
         return "%.1f%s%s" % (num, 'Yi', suffix)
 
-    # this is needed because pakrat suppressed normal stdout because of YUM
-    def log(self, msg):
-        sys.__stdout__.write('%s\n' % msg)
-        sys.__stdout__.flush()
-
     def repo_init(self, repo_id, num_pkgs):
         self.totalpkg = num_pkgs
         self.finishpkg = 0
-        self.log('Found %d packages in repo %s' % (num_pkgs, repo_id))
+        log('Found %d packages in repo %s' % (num_pkgs, repo_id), repo_id=repo_id)
     def local_pkg_exists(self, repo_id, pkgname):
         self.finishpkg += 1
-        self.log('(%d/%d) %s, %s already downloaded' % (self.finishpkg, self.totalpkg, repo_id, pkgname))
+        log('(%d/%d): %s, %s already downloaded' % (self.finishpkg, self.totalpkg, repo_id, pkgname))
     def repo_metadata(self, repo_id, status):
-        self.log('Metadata for repo %s is now %s' % (repo_id, status))
+        log('Metadata for repo %s is now %s' % (repo_id, status), repo_id=repo_id)
     def download_start(self, repo_id, _file, url, basename, size, text):
         self.fname = basename
     def download_end(self, repo_id, size):
         if self.fname.endswith('.rpm'):
             self.finishpkg += 1
-            self.log('(%d/%d) %s, %s (%s)' % (self.finishpkg, self.totalpkg, repo_id, self.fname, self.sizeof_fmt(size)))
-
-def log(msg, plain=False):
-    if plain == True:
-        print(msg)
-    else:
-        print("==> [{0}] {1}".format(time.strftime('%Y-%m-%d %X %Z'), msg))
+            log('(%d/%d): %s, %s (%s)' % (self.finishpkg, self.totalpkg, repo_id, self.fname, self.sizeof_fmt(size)), repo_id=repo_id)
 
 # make directories only if they don't exist
 def safe_makedirs(path, mode = None):
@@ -109,11 +112,10 @@ def download_gpg(config):
                     f.write(key_data.read())
                 key_data.close()
             except:
-                log('Unable to download %s' % opts['gpgkey'], plain=True)
+                log('Unable to download %s' % opts['gpgkey'])
                 pass
 
 def sync_repos(config):
-    version = time.strftime('%Y-%m-%d')
     repo_factories = []
 
     for repo, opts in config.iteritems():
@@ -134,24 +136,24 @@ def sync_repos(config):
     repos, errors, elapsed = pakrat.sync(
         basedir=OUTDIR,
         objrepos=repo_factories,
-        repoversion=version,
+        repoversion=SYNCVERSION,
         callback=RepoCallback()
     )
 
     return repos, errors, elapsed
 
 def main():
-    log('parsing configuration')
+    log('parsing configuration', header=True)
     config = repo_config()
     for repo in config.iterkeys():
-        log(repo, plain=True)
+        log(repo)
     setup_folders(config.keys())
     download_gpg(config)
-    log('syncing repositories')
+    log('syncing repositories', header=True)
     repos, errors, elapsed = sync_repos(config)
     repo_str = 'repository' if repos == 1 else 'repositories'
     error_str = 'error' if errors == 1 else 'errors'
-    log('%d %s, %d %s, %s' % (repos, repo_str, errors, error_str, elapsed))
+    log('%d %s, %d %s, %s' % (repos, repo_str, errors, error_str, elapsed), header=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -160,4 +162,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     REPOFILE = args.config
     OUTDIR = args.outdir
+    SYNCVERSION = time.strftime('%Y-%m-%d')
     main()
